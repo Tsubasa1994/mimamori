@@ -339,7 +339,7 @@ const ICE = { iceServers: [
   { urls: "stun:global.stun.twilio.com:3478" }
 ]};
 
-let camRetry = 0, camRetryTimer = null, idConflicts = 0, camGen = 0;
+let camRetry = 0, camRetryTimer = null, idConflicts = 0, camGen = 0, gaveUpFixed = false;
 
 /* 固定番号がどうしても取れないときの、その場かぎりの番号 */
 function randomCode(){
@@ -396,20 +396,21 @@ function connectAsCamera(code){
 
     if (e.type === "unavailable-id") {
       idConflicts++;
-      if (idConflicts >= 2) {
+      if (idConflicts >= 2 || gaveUpFixed) {
         const rc = randomCode();
+        gaveUpFixed = true;              /* 以後この固定番号は二度と試さない */
         LOG("固定番号を諦めて " + rc + " に切替");
         setCamStatus("bad", "番号を変更しました。この番号を見る側に入力してください");
         idConflicts = 0;
-        camRetryTimer = setTimeout(() => connectAsCamera(rc), 1000);
+        camRetryTimer = setTimeout(() => { if (alive()) connectAsCamera(rc); }, 1000);
       } else {
         setCamStatus("bad", "同じ番号を他の端末が使用中。取り直します");
-        camRetryTimer = setTimeout(() => connectAsCamera(code), 6000);
+        camRetryTimer = setTimeout(() => { if (alive()) connectAsCamera(code); }, 6000);
       }
 
     } else if (e.type === "network" || e.type === "server-error" || e.type === "socket-error") {
       setCamStatus("bad", "サーバーに繋がりません。再試行します（" + camRetry + "回目）");
-      camRetryTimer = setTimeout(() => connectAsCamera(code), 4000);
+      camRetryTimer = setTimeout(() => { if (alive()) connectAsCamera(code); }, 4000);
 
     } else {
       setCamStatus("bad", "エラー：" + e.type);
