@@ -33,7 +33,7 @@
   /* ---------- 画面共通 ---------- */
   .screen{display:none;flex:1;flex-direction:column;min-height:0}
   .screen.on{display:flex}
-  .wrap{width:100%;max-width:520px;margin:0 auto;padding:28px 22px;flex:1;display:flex;flex-direction:column;justify-content:center;gap:26px}
+  .wrap{width:100%;max-width:520px;margin:0 auto;padding:28px 22px;flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:26px;overflow-y:auto;-webkit-overflow-scrolling:touch}
 
   .eyebrow{font-size:12px;letter-spacing:.22em;color:var(--amber);text-transform:uppercase}
   h1{font-size:30px;font-weight:600;line-height:1.35;letter-spacing:-.01em}
@@ -186,7 +186,10 @@
       <div class="status"><span class="dot" id="camDot"></span><span id="camStat">カメラを準備しています</span></div>
     </div>
 
-    <button class="btn" id="camSwitch">前後のカメラを切り替える</button>
+    <button class="btn" id="camDark">画面を暗くする</button>
+    <p class="note">暗くしたあとも撮影は続きます。戻すときは画面を<b>長押し（1秒）</b>。<br>端末の明るさも手動で最小にすると、さらに電池が持ちます。</p>
+
+    <button class="btn ghost" id="camSwitch">前後のカメラを切り替える</button>
 
     <div class="card" style="cursor:default;gap:14px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
@@ -212,17 +215,6 @@
       </p>
     </div>
 
-    <div class="card" style="cursor:default;gap:8px">
-      <div style="display:flex;align-items:center;justify-content:space-between">
-        <span style="font-size:13px;color:var(--mute)">接続の記録</span>
-        <button class="iconbtn" id="logCopy" style="background:#1d2540">コピー</button>
-      </div>
-      <div class="mono" id="log" style="font-size:11px;line-height:1.6;color:var(--mute);white-space:pre-wrap;word-break:break-all;max-height:190px;overflow-y:auto"></div>
-    </div>
-
-    <button class="btn" id="camDark" style="background:#1d2540;color:var(--text)">画面を暗くして見守りを始める</button>
-
-    <p class="note">暗くしたあとも撮影は続きます。<br>戻すときは画面を<b>長押し（1秒）</b>してください。<br>端末の明るさも手動で最小にすると、さらに電池が持ちます。</p>
   </div>
 
   <div id="darkveil">
@@ -291,12 +283,6 @@ function LOG(msg){
   const el = $("log");
   if (el){ el.textContent = logLines.join("\n"); el.scrollTop = el.scrollHeight; }
 }
-$("logCopy").onclick = () => {
-  navigator.clipboard.writeText(logLines.join("\n"))
-    .then(() => { $("logCopy").textContent = "コピー済"; })
-    .catch(() => { $("logCopy").textContent = "失敗"; });
-};
-
 /* 画面が勝手に消えないようにする。復帰のたびに取り直す必要がある */
 let wakeLock = null;
 async function keepAwake(){
