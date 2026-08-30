@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<title>みまもり</title>
+<style>
+  :root{
+    --ink:#0b1020;        /* 夜の壁 */
+    --ink-2:#141b31;      /* パネル */
+    --line:#25304f;       /* 罫 */
+    --text:#e7e3d8;       /* 温白 */
+    --mute:#8894b4;       /* 補助文字 */
+    --amber:#e8a13a;      /* 常夜灯の色 = 主アクセント */
+    --amber-dim:#7a5a22;
+    --alive:#5fd39a;      /* 接続中 */
+    --alarm:#e2604a;      /* 切断 */
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    background:var(--ink);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    font-size:16px;line-height:1.7;
+    display:flex;flex-direction:column;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    overflow:hidden;
+  }
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+
+  /* ---------- 画面共通 ---------- */
+  .screen{display:none;flex:1;flex-direction:column;min-height:0}
+  .screen.on{display:flex}
+  .wrap{width:100%;max-width:520px;margin:0 auto;padding:28px 22px;flex:1;display:flex;flex-direction:column;justify-content:center;gap:26px}
+
+  .eyebrow{font-size:12px;letter-spacing:.22em;color:var(--amber);text-transform:uppercase}
+  h1{font-size:30px;font-weight:600;line-height:1.35;letter-spacing:-.01em}
+  h1 small{display:block;font-size:14px;font-weight:400;color:var(--mute);letter-spacing:0;margin-top:8px}
+
+  .card{
+    background:var(--ink-2);border:1px solid var(--line);border-radius:14px;
+    padding:20px;display:flex;flex-direction:column;gap:12px;
+    text-align:left;width:100%;color:inherit;font:inherit;cursor:pointer;
+    transition:border-color .15s ease, transform .15s ease;
+  }
+  .card:hover,.card:focus-visible{border-color:var(--amber);transform:translateY(-2px)}
+  .card:focus-visible{outline:2px solid var(--amber);outline-offset:3px}
+  .card .role{font-size:19px;font-weight:600}
+  .card .desc{font-size:13.5px;color:var(--mute);line-height:1.6}
+
+  button{font:inherit}
+  .btn{
+    background:var(--amber);color:#1b1206;border:0;border-radius:11px;
+    padding:15px 20px;font-size:16px;font-weight:600;width:100%;cursor:pointer;
+  }
+  .btn:focus-visible{outline:2px solid var(--text);outline-offset:3px}
+  .btn.ghost{background:transparent;color:var(--mute);border:1px solid var(--line)}
+  .btn:disabled{opacity:.45;cursor:default}
+
+  label{font-size:13px;color:var(--mute);display:block;margin-bottom:7px}
+  input[type=text]{
+    width:100%;background:#0d1327;border:1px solid var(--line);
+    border-radius:11px;padding:15px;color:var(--text);font-size:20px;letter-spacing:.16em;
+    text-align:center;text-transform:uppercase;
+  }
+  input[type=text]:focus{outline:none;border-color:var(--amber)}
+
+  .status{display:flex;align-items:center;gap:9px;font-size:13.5px;color:var(--mute)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--mute);flex:none}
+  .dot.ok{background:var(--alive)}
+  .dot.bad{background:var(--alarm)}
+
+  .note{font-size:12.5px;color:var(--mute);line-height:1.75;border-left:2px solid var(--amber-dim);padding-left:12px}
+
+  /* ---------- カメラ側：消灯モード ----------
+     育児室に光を撒かないため、点灯するのは呼吸する点ひとつだけ。
+     有機ELなら真っ黒の画素は発光しないので、電池も実際に長持ちする */
+  #camScreen{background:#000}
+  #darkveil{
+    position:fixed;inset:0;background:#000;z-index:9999;
+    display:none;align-items:center;justify-content:center;
+    touch-action:none;user-select:none;-webkit-user-select:none;
+  }
+  #darkveil.on{display:flex}
+  #breath{
+    width:6px;height:6px;border-radius:50%;background:var(--amber);
+    opacity:.16;animation:breathe 5s ease-in-out infinite;
+  }
+  #breath.bad{background:var(--alarm);opacity:.42;animation-duration:1.1s}
+  @keyframes breathe{0%,100%{opacity:.05;transform:scale(.8)}50%{opacity:.24;transform:scale(1)}}
+
+  /* 案内文は数秒で自分から消える。消えたあとは完全な暗闇になる */
+  #veilhint{
+    position:fixed;bottom:40px;left:0;right:0;text-align:center;
+    font-size:12px;color:#3a4666;transition:opacity 1.2s ease;
+  }
+  #veilhint.gone{opacity:0}
+
+  /* 長押し中に、ごく淡い輪が広がって進み具合を示す */
+  #veilring{
+    position:absolute;width:74px;height:74px;border-radius:50%;
+    border:1px solid var(--amber-dim);opacity:0;transform:scale(.5);
+    transition:opacity .12s linear, transform .8s linear;
+    pointer-events:none;
+  }
+  #veilring.go{opacity:.5;transform:scale(1)}
+
+  /* ---------- モニター側 ---------- */
+  #monScreen{background:#000}
+  #stage{flex:1;position:relative;min-height:0;background:#000}
+  video{width:100%;height:100%;object-fit:contain;display:block;background:#000}
+  #bar{
+    position:absolute;left:0;right:0;bottom:0;
+    padding:14px 16px calc(14px + env(safe-area-inset-bottom));
+    background:linear-gradient(transparent,rgba(0,0,0,.85) 45%);
+    display:flex;align-items:center;justify-content:space-between;gap:14px;
+  }
+  #topbar{
+    position:absolute;top:0;left:0;right:0;padding:12px 16px;
+    background:linear-gradient(rgba(0,0,0,.8),transparent);
+    display:flex;align-items:center;gap:9px;font-size:13px;color:var(--mute);
+  }
+  .iconbtn{background:rgba(255,255,255,.08);border:0;color:var(--text);border-radius:9px;padding:9px 13px;font-size:13px;cursor:pointer}
+
+  /* ノイズ設定 */
+  .seg{display:flex;gap:6px}
+  .seg button{
+    flex:1;background:#0d1327;border:1px solid var(--line);color:var(--mute);
+    border-radius:9px;padding:10px 4px;font-size:13px;cursor:pointer;
+  }
+  .seg button.on{border-color:var(--amber);color:var(--amber);background:#1a1608}
+  .seg button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+
+  input[type=range]{
+    width:100%;-webkit-appearance:none;appearance:none;background:transparent;height:26px;cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-runnable-track{height:5px;border-radius:3px;background:#1d2540}
+  input[type=range]::-moz-range-track{height:5px;border-radius:3px;background:#1d2540}
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:22px;height:22px;border-radius:50%;
+    background:var(--amber);margin-top:-8.5px;border:0;
+  }
+  input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--amber);border:0}
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== 1. 役割選択 ===== -->
+<section id="pickScreen" class="screen on">
+  <div class="wrap">
+    <div>
+      <p class="eyebrow">Mimamori</p>
+      <h1>この端末の役割を選ぶ<small>2台とも、同じこのページを開いてください。</small></h1>
+    </div>
+
+    <button class="card" id="pickCam">
+      <span class="role">カメラにする</span>
+      <span class="desc">ベビーベッドに向けて置く側。映像と音を送ります。</span>
+    </button>
+
+    <button class="card" id="pickMon">
+      <span class="role">見る側にする</span>
+      <span class="desc">手元で見る側。カメラ側に表示された6桁の数字を入力します。</span>
+    </button>
+
+    <p class="note">映像は端末どうしで直接やり取りされ、録画も保存もされません。広告もありません。</p>
+  </div>
+</section>
+
+<!-- ===== 2. カメラ側 ===== -->
+<section id="camScreen" class="screen">
+  <div class="wrap">
+    <div>
+      <p class="eyebrow">カメラ</p>
+      <h1>この番号を、見る側に入力<small>ページを閉じると接続が切れます。</small></h1>
+    </div>
+
+    <div class="card" style="cursor:default;align-items:center;gap:6px">
+      <div class="mono" id="roomCode" style="font-size:44px;letter-spacing:.2em;color:var(--amber);text-align:center">------</div>
+      <div class="status"><span class="dot" id="camDot"></span><span id="camStat">カメラを準備しています</span></div>
+    </div>
+
+    <button class="btn" id="camSwitch">前後のカメラを切り替える</button>
+
+    <div class="card" style="cursor:default;gap:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+        <span style="font-size:16px;font-weight:600">ホワイトノイズ</span>
+        <button class="iconbtn" id="noiseToggle" style="background:#1d2540">鳴らす</button>
+      </div>
+
+      <div class="seg" id="noiseKind">
+        <button data-kind="pink" class="on">ピンク</button>
+        <button data-kind="brown">ブラウン</button>
+        <button data-kind="white">ホワイト</button>
+      </div>
+
+      <div>
+        <label for="noiseVol" style="display:flex;justify-content:space-between">
+          <span>音量</span><span class="mono" id="volRead">15%</span>
+        </label>
+        <input type="range" id="noiseVol" min="0" max="60" value="15" step="1">
+      </div>
+
+      <p class="note" style="border-color:var(--alarm)">
+        隣に立って普通に会話できる音量まで。ベッドから2m以上離してください。
+      </p>
+    </div>
+
+    <div class="card" style="cursor:default;gap:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:13px;color:var(--mute)">接続の記録</span>
+        <button class="iconbtn" id="logCopy" style="background:#1d2540">コピー</button>
+      </div>
+      <div class="mono" id="log" style="font-size:11px;line-height:1.6;color:var(--mute);white-space:pre-wrap;word-break:break-all;max-height:190px;overflow-y:auto"></div>
+    </div>
+
+    <button class="btn" id="camDark" style="background:#1d2540;color:var(--text)">画面を暗くして見守りを始める</button>
+
+    <p class="note">暗くしたあとも撮影は続きます。<br>戻すときは画面を<b>長押し（1秒）</b>してください。<br>端末の明るさも手動で最小にすると、さらに電池が持ちます。</p>
+  </div>
+
+  <div id="darkveil">
+    <div id="veilring"></div>
+    <div id="breath"></div>
+    <div id="veilhint">戻すときは画面を長押し</div>
+  </div>
+</section>
+
+<!-- ===== 3. 見る側：コード入力 ===== -->
+<section id="joinScreen" class="screen">
+  <div class="wrap">
+    <div>
+      <p class="eyebrow">見る側</p>
+      <h1>カメラの番号を入力<small>カメラ側の画面に出ている6桁の数字です。</small></h1>
+    </div>
+    <div>
+      <label for="codeIn">接続コード</label>
+      <input type="text" id="codeIn" class="mono" maxlength="6" placeholder="000000"
+             autocomplete="off" spellcheck="false" inputmode="numeric" pattern="[0-9]*"
+             style="font-size:30px;letter-spacing:.24em">
+    </div>
+    <button class="btn" id="joinGo">つなぐ</button>
+    <div class="status"><span class="dot" id="joinDot"></span><span id="joinStat">待機中</span></div>
+  </div>
+</section>
+
+<!-- ===== 4. 見る側：映像 ===== -->
+<section id="monScreen" class="screen">
+  <div id="stage">
+    <video id="remote" playsinline autoplay></video>
+    <div id="topbar">
+      <span class="dot" id="monDot"></span><span id="monStat">接続中</span>
+    </div>
+    <div id="bar">
+      <button class="iconbtn" id="muteBtn">音を消す</button>
+      <button class="iconbtn" id="endBtn">終了</button>
+    </div>
+  </div>
+</section>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+const show = id => {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('on'));
+  $(id).classList.add('on');
+};
+
+const NS = "mimamori-v1-";
+
+/* 起動のたびに変わる6桁の数字。数字だけなのはテンキーで打てるようにするため */
+function makeCode(){
+  return Array.from(crypto.getRandomValues(new Uint8Array(6)))
+    .map(n => n % 10).join("");
+}
+
+/* 画面に残る記録。原因の切り分けはここを見る */
+const logLines = [];
+function LOG(msg){
+  const t = new Date().toTimeString().slice(0,8);
+  logLines.push(t + "  " + msg);
+  if (logLines.length > 40) logLines.shift();
+  const el = $("log");
+  if (el){ el.textContent = logLines.join("\n"); el.scrollTop = el.scrollHeight; }
+}
+$("logCopy").onclick = () => {
+  navigator.clipboard.writeText(logLines.join("\n"))
+    .then(() => { $("logCopy").textContent = "コピー済"; })
+    .catch(() => { $("logCopy").textContent = "失敗"; });
+};
+
+/* 画面が勝手に消えないようにする。復帰のたびに取り直す必要がある */
+let wakeLock = null;
+async function keepAwake(){
+  try{
+    if (!("wakeLock" in navigator)) return;
+    if (wakeLock && !wakeLock.released) return;
+    wakeLock = await navigator.wakeLock.request("screen");
+    wakeLock.addEventListener("release", () => { wakeLock = null; });
+  }catch(e){ /* 非対応端末では何もしない */ }
+}
+
+/* 通信経路を見つけるためのサーバー */
+const ICE = { iceServers: [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "stun:global.stun.twilio.com:3478" }
+]};
+
+/* ================= カメラ側 ================= */
+let camStream = null, camPeer = null, facing = "environment", viewers = new Map();
+let camRetry = 0, camRetryTimer = null, camGen = 0;
+
+async function startCamera(){
+  show("camScreen");
+  const code = makeCode();
+  $("roomCode").textContent = code;
+  await keepAwake();
+  await openStream();
+  connectAsCamera(code);
+}
+
+async function openStream(){
+  try{
+    if (camStream) camStream.getTracks().forEach(t => t.stop());
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: facing, width:{ideal:640}, height:{ideal:480}, frameRate:{ideal:15,max:20} },
+      /* ノイズを鳴らすので、自分のスピーカー音をマイクから差し引く。
+         noiseSuppression は「定常ノイズを消す」処理で泣き声も削りかねないので使わない */
+      audio: { echoCancellation:true, noiseSuppression:false, autoGainControl:false }
+    });
+    setCamStatus("bad", "カメラ準備OK。サーバーに登録中…");
+    LOG("カメラ起動");
+  }catch(err){
+    setCamStatus("bad", "カメラを使えません。ブラウザの権限を確認してください");
+    LOG("⚠️ カメラ起動失敗: " + (err && err.name ? err.name : "不明"));
+  }
+}
+
+function connectAsCamera(code){
+  clearTimeout(camRetryTimer);
+
+  /* 世代番号。古い接続を破棄すると「切断された」と鳴くので、
+     その声を聞いて再接続しないよう、現役かどうかをここで見分ける */
+  const gen = ++camGen;
+  if (camPeer) { try{ camPeer.destroy(); }catch(e){} }
+
+  LOG("接続開始 → " + code);
+  const p = new Peer(NS + code, { debug:0, config: ICE });
+  camPeer = p;
+
+  const alive = () => (gen === camGen && camPeer === p);
+
+  p.on("open", () => {
+    if (!alive()) return;
+    camRetry = 0;
+    LOG("✅ 登録できました");
+    $("roomCode").textContent = code;
+    setCamStatus("ok", "接続待ちです");
+  });
+
+  p.on("connection", conn => {
+    if (!alive()) return;
+    LOG("見る側から接続");
+    conn.on("data", data => {
+      if (data && data.type === "hello" && camStream) {
+        const call = p.call(data.peerId, camStream);
+        viewers.set(data.peerId, call);
+        LOG("映像を送信開始");
+        setCamStatus("ok", "見る側とつながりました（" + viewers.size + "台）");
+      }
+    });
+    conn.on("close", () => {
+      if (!alive()) return;
+      viewers.delete(conn.peer);
+      LOG("見る側が切断");
+      setCamStatus("ok", viewers.size ? "つながっています（" + viewers.size + "台）" : "接続待ちです");
+    });
+  });
+
+  p.on("error", e => {
+    if (!alive()) return;
+    camRetry++;
+    LOG("⚠️ エラー: " + e.type);
+
+    if (e.type === "unavailable-id") {
+      /* まれに他人と番号がぶつかる。黙って別の番号を取り直す */
+      const rc = makeCode();
+      LOG("番号がぶつかりました → " + rc);
+      camRetryTimer = setTimeout(() => { if (alive()) connectAsCamera(rc); }, 800);
+
+    } else if (e.type === "network" || e.type === "server-error" || e.type === "socket-error") {
+      setCamStatus("bad", "サーバーに繋がりません。再試行します（" + camRetry + "回目）");
+      camRetryTimer = setTimeout(() => { if (alive()) connectAsCamera(code); }, 4000);
+
+    } else {
+      setCamStatus("bad", "エラー：" + e.type);
+    }
+  });
+
+  p.on("disconnected", () => {
+    if (!alive()) return;          /* 古い接続の断末魔は無視する */
+    LOG("切断された。再接続します");
+    setCamStatus("bad", "再接続しています");
+    camRetryTimer = setTimeout(() => {
+      if (!alive()) return;
+      if (!p.destroyed) {
+        try{ p.reconnect(); }catch(e){ connectAsCamera(code); }
+      } else {
+        connectAsCamera(code);
+      }
+    }, 2000);
+  });
+
+  p.on("close", () => { if (alive()) LOG("接続が閉じました"); });
+}
+
+function setCamStatus(kind, msg){
+  $("camStat").textContent = msg;
+  $("camDot").className = "dot " + (kind === "ok" ? "ok" : "bad");
+  $("breath").className = (kind === "ok" ? "" : "bad");
+}
+
+$("pickCam").onclick = startCamera;
+$("pickMon").onclick = () => {
+  show("joinScreen");
+  $("codeIn").value = "";
+  $("codeIn").focus();
+};
+
+$("camSwitch").onclick = async () => {
+  facing = (facing === "environment") ? "user" : "environment";
+  await openStream();
+  viewers.forEach(call => {
+    const sender = call.peerConnection && call.peerConnection.getSenders()
+      .find(s => s.track && s.track.kind === "video");
+    if (sender) sender.replaceTrack(camStream.getVideoTracks()[0]);
+  });
+};
+
+/* ---------- 消灯モード ----------
+   戻すのは長押し1秒。寝ぼけた手が触れただけでは戻らないようにするため。
+   タッチとマウスの両方で同じように動くよう pointer イベントで受ける */
+const veil = $("darkveil"), ring = $("veilring"), hint = $("veilhint");
+let holdTimer = null, hintTimer = null;
+
+function veilOn(){
+  veil.classList.add("on");
+  hint.classList.remove("gone");
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => hint.classList.add("gone"), 4000);
+  keepAwake();
+  LOG("画面を暗くしました");
+}
+function veilOff(){
+  veil.classList.remove("on");
+  clearTimeout(holdTimer); clearTimeout(hintTimer);
+  ring.classList.remove("go");
+  keepAwake();
+  LOG("画面を戻しました");
+}
+
+$("camDark").onclick = veilOn;
+
+veil.addEventListener("pointerdown", e => {
+  e.preventDefault();
+  ring.classList.add("go");
+  clearTimeout(holdTimer);
+  holdTimer = setTimeout(veilOff, 1000);
+});
+["pointerup","pointercancel","pointerleave"].forEach(ev =>
+  veil.addEventListener(ev, () => {
+    clearTimeout(holdTimer);
+    ring.classList.remove("go");
+  })
+);
+/* 長押しが効かない環境向けの保険 */
+veil.addEventListener("dblclick", veilOff);
+
+/* ================= ホワイトノイズ生成 =================
+   カメラ側の端末で鳴らす。自分の音がマイクに回り込む分は
+   echoCancellation が差し引くが、それでも取りこぼすので
+   泣き声の帯域（300〜600Hz）はノイズ側から削っておく。 */
+let noiseCtx = null, noiseSrc = null, noiseGain = null, noiseKind = "pink", noiseOn = false;
+
+function buildNoiseBuffer(ctx, kind){
+  const len = ctx.sampleRate * 4;              /* 4秒ぶんを作ってループ */
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const out = buf.getChannelData(0);
+
+  if (kind === "white") {
+    for (let i = 0; i < len; i++) out[i] = Math.random() * 2 - 1;
+
+  } else if (kind === "brown") {
+    let last = 0;
+    for (let i = 0; i < len; i++){
+      const w = Math.random() * 2 - 1;
+      last = (last + 0.02 * w) / 1.02;
+      out[i] = last * 3.5;
+    }
+
+  } else {
+    /* ピンクノイズ（Paul Kellet 近似）。低域寄りで耳当たりがやわらかい */
+    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+    for (let i = 0; i < len; i++){
+      const w = Math.random() * 2 - 1;
+      b0 = 0.99886*b0 + w*0.0555179;
+      b1 = 0.99332*b1 + w*0.0750759;
+      b2 = 0.96900*b2 + w*0.1538520;
+      b3 = 0.86650*b3 + w*0.3104856;
+      b4 = 0.55000*b4 + w*0.5329522;
+      b5 = -0.7616*b5 - w*0.0168980;
+      out[i] = (b0+b1+b2+b3+b4+b5+b6 + w*0.5362) * 0.11;
+      b6 = w * 0.115926;
+    }
+  }
+
+  /* ループの継ぎ目で「プツッ」と鳴らないよう、端どうしをなじませる */
+  const fade = Math.floor(ctx.sampleRate * 0.05);
+  for (let i = 0; i < fade; i++){
+    const k = i / fade;
+    out[i] = out[i]*k + out[len-fade+i]*(1-k);
+  }
+  return buf;
+}
+
+function startNoise(){
+  stopNoise(true);
+  noiseCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  noiseSrc = noiseCtx.createBufferSource();
+  noiseSrc.buffer = buildNoiseBuffer(noiseCtx, noiseKind);
+  noiseSrc.loop = true;
+
+  /* 泣き声の通り道を空けるノッチ。450Hz付近を大きく凹ませる */
+  const notch = noiseCtx.createBiquadFilter();
+  notch.type = "peaking";
+  notch.frequency.value = 450;
+  notch.Q.value = 0.9;
+  notch.gain.value = -14;
+
+  /* 耳に刺さる高域を落とす */
+  const shelf = noiseCtx.createBiquadFilter();
+  shelf.type = "highshelf";
+  shelf.frequency.value = 6000;
+  shelf.gain.value = -10;
+
+  noiseGain = noiseCtx.createGain();
+  noiseGain.gain.value = 0;
+
+  noiseSrc.connect(notch).connect(shelf).connect(noiseGain).connect(noiseCtx.destination);
+  noiseSrc.start();
+
+  /* いきなり鳴らさず2秒かけて上げる */
+  const target = $("noiseVol").value / 100;
+  noiseGain.gain.linearRampToValueAtTime(target, noiseCtx.currentTime + 2);
+
+  noiseOn = true;
+  $("noiseToggle").textContent = "止める";
+  $("noiseToggle").style.background = "var(--amber-dim)";
+}
+
+function stopNoise(silent){
+  try{ if (noiseSrc) noiseSrc.stop(); }catch(e){}
+  try{ if (noiseCtx) noiseCtx.close(); }catch(e){}
+  noiseSrc = noiseCtx = noiseGain = null;
+  noiseOn = false;
+  if (!silent){
+    $("noiseToggle").textContent = "鳴らす";
+    $("noiseToggle").style.background = "#1d2540";
+  }
+}
+
+$("noiseToggle").onclick = () => noiseOn ? stopNoise() : startNoise();
+
+$("noiseKind").addEventListener("click", e => {
+  const b = e.target.closest("button[data-kind]");
+  if (!b) return;
+  $("noiseKind").querySelectorAll("button").forEach(x => x.classList.remove("on"));
+  b.classList.add("on");
+  noiseKind = b.dataset.kind;
+  if (noiseOn) startNoise();
+});
+
+$("noiseVol").addEventListener("input", e => {
+  const v = e.target.value;
+  $("volRead").textContent = v + "%";
+  if (noiseGain) noiseGain.gain.setTargetAtTime(v / 100, noiseCtx.currentTime, 0.1);
+});
+
+/* ================= 見る側 ================= */
+let monPeer = null, monConn = null;
+let lastCode = null;      /* 再接続に使う番号 */
+let watching = false;     /* 見守り中か。終了ボタンでだけ false になる */
+let monGen = 0, monTimer = null;
+
+/* 映像が本当に生きているか。切れていても srcObject は残るので中身を見る */
+function streamLive(){
+  const v = $("remote");
+  return !!(v.srcObject && v.srcObject.getTracks().some(t => t.readyState === "live"));
+}
+
+function scheduleRejoin(delay){
+  if (!watching || !lastCode) return;
+  clearTimeout(monTimer);
+  monTimer = setTimeout(() => {
+    if (watching && lastCode) joinRoom(lastCode);
+  }, delay || 2500);
+}
+
+$("joinGo").onclick = () => {
+  const code = ($("codeIn").value || "").replace(/\D/g, "");
+  if (code.length !== 6) { setJoinStatus("bad", "6桁の数字を入力してください"); return; }
+  setJoinStatus("", "つないでいます");
+  $("joinGo").disabled = true;
+  joinRoom(code);
+};
+$("codeIn").addEventListener("keydown", e => { if (e.key === "Enter") $("joinGo").click(); });
+
+function joinRoom(code){
+  lastCode = code;
+  clearTimeout(monTimer);
+
+  const gen = ++monGen;
+  try{ if (monPeer) monPeer.destroy(); }catch(e){}
+
+  const p = new Peer({ debug:0, config: ICE });
+  monPeer = p;
+  const alive = () => (gen === monGen && monPeer === p);
+
+  const failTimer = setTimeout(() => {
+    if (!alive()) return;
+    if (watching) {
+      /* 見守り中なら画面はそのまま。黙って粘り続ける */
+      setMonStatus("bad", "再接続しています");
+      scheduleRejoin(4000);
+    } else {
+      setJoinStatus("bad", "カメラ側が見つかりません。カメラ側が「接続待ちです」になっているか確認してください");
+      $("joinGo").disabled = false;
+      try{ p.destroy(); }catch(e){}
+    }
+  }, 20000);
+
+  p.on("open", myId => {
+    if (!alive()) return;
+    monConn = p.connect(NS + code, { reliable:true });
+    monConn.on("open", () => monConn.send({ type:"hello", peerId: myId }));
+    monConn.on("error", () => {});
+  });
+
+  p.on("call", call => {
+    if (!alive()) return;
+    clearTimeout(failTimer);
+    call.answer();
+
+    call.on("stream", stream => {
+      if (!alive()) return;
+      const v = $("remote");
+      v.srcObject = stream;
+      v.play().catch(()=>{});
+      watching = true;
+      show("monScreen");
+      keepAwake();
+      setMonStatus("ok", "つながっています");
+    });
+
+    call.on("close", () => {
+      if (!alive()) return;
+      setMonStatus("bad", "切れました。再接続しています");
+      scheduleRejoin(2000);
+    });
+  });
+
+  p.on("error", e => {
+    if (!alive()) return;
+    clearTimeout(failTimer);
+
+    if (watching) {
+      /* 見守り中は画面を保ったまま、静かに繰り返す */
+      setMonStatus("bad", "再接続しています");
+      scheduleRejoin(e.type === "peer-unavailable" ? 3000 : 5000);
+      return;
+    }
+
+    setJoinStatus("bad",
+      e.type === "peer-unavailable" ? "その番号のカメラが登録されていません" :
+      e.type === "network" || e.type === "server-error" || e.type === "socket-error"
+        ? "サーバーに繋がりません。通信環境を確認してください"
+        : "接続できませんでした（" + e.type + "）");
+    $("joinGo").disabled = false;
+  });
+
+  p.on("disconnected", () => {
+    if (!alive()) return;
+    setMonStatus("bad", "再接続しています");
+    scheduleRejoin(2000);
+  });
+}
+
+function setJoinStatus(kind, msg){
+  $("joinStat").textContent = msg;
+  $("joinDot").className = "dot " + (kind === "ok" ? "ok" : kind === "bad" ? "bad" : "");
+}
+function setMonStatus(kind, msg){
+  $("monStat").textContent = msg;
+  $("monDot").className = "dot " + (kind === "ok" ? "ok" : "bad");
+}
+
+/* ---------- 画面に戻ってきたときの復帰 ----------
+   ブラウザは他のアプリに切り替わると止められる。維持はできないので、
+   戻ってきた瞬間に、番号を打ち直さず自動でつなぎ直す */
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  keepAwake();
+  if (!watching) return;
+  $("remote").play().catch(()=>{});
+  if (!streamLive()) {
+    setMonStatus("bad", "再接続しています");
+    joinRoom(lastCode);
+  }
+});
+window.addEventListener("pageshow", () => {
+  if (watching && !streamLive()) joinRoom(lastCode);
+});
+
+/* 見落としの保険。表示中に切れたままなら定期的に拾い直す */
+setInterval(() => {
+  if (document.visibilityState !== "visible") return;
+  if (watching && lastCode && !streamLive()) joinRoom(lastCode);
+}, 8000);
+
+$("muteBtn").onclick = () => {
+  const v = $("remote");
+  v.muted = !v.muted;
+  $("muteBtn").textContent = v.muted ? "音を出す" : "音を消す";
+};
+
+$("endBtn").onclick = () => {
+  watching = false;
+  lastCode = null;
+  clearTimeout(monTimer);
+  monGen++;
+  try{ if (monPeer) monPeer.destroy(); }catch(e){}
+  $("remote").srcObject = null;
+  $("joinGo").disabled = false;
+  setJoinStatus("", "待機中");
+  show("joinScreen");
+};
+
+/* 誤操作で見守りが止まらないように、閉じる前に確認する */
+window.addEventListener("beforeunload", e => {
+  if (camStream || watching) { e.preventDefault(); e.returnValue = ""; }
+});
+
+</script>
+</body>
+</html>
